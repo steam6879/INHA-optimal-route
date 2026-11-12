@@ -7,48 +7,72 @@
 <meta name="apple-mobile-web-app-title" content="탑승">
 <title>탑승</title>
 <style>
-  :root { --bg:#fff; --fg:#111; --sub:#666; --card:#f3f4f6; --suin:#d97706; --exp:#2563eb; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0c; --fg:#f2f2f2; --sub:#9a9a9a; --card:#1c1c1f; } }
+  :root { --bg:#fff; --fg:#111; --sub:#666; --card:#f3f4f6; --line:#e5e7eb; --suin:#d97706; --exp:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0c; --fg:#f2f2f2; --sub:#9a9a9a; --card:#1c1c1f; --line:#2a2a2e; } }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
          font-family:-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-         padding:calc(env(safe-area-inset-top) + 24px) 20px 32px; }
+         padding:calc(env(safe-area-inset-top) + 16px) 20px 32px; }
+  .tabs { display:flex; gap:6px; background:var(--card); padding:4px; border-radius:12px; margin-bottom:22px; }
+  .tabs button { flex:1; padding:11px 6px; font-size:16px; font-weight:700; border:0; border-radius:9px;
+                 background:transparent; color:var(--sub); }
+  .tabs button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 3px rgba(0,0,0,.15); }
   .time { font-size:15px; color:var(--sub); }
-  .route { font-size:44px; font-weight:800; margin:6px 0 20px; line-height:1.1; }
+  .route { font-size:40px; font-weight:800; margin:6px 0 20px; line-height:1.15; word-break:keep-all; }
   .route.suin { color:var(--suin); } .route.exp { color:var(--exp); }
   .card { background:var(--card); border-radius:14px; padding:14px 16px; margin-bottom:10px; font-size:17px; line-height:1.45; }
   .card b { display:block; font-size:13px; color:var(--sub); font-weight:600; margin-bottom:2px; }
-  .win { outline:2px solid currentColor; }
-  button { margin-top:14px; width:100%; padding:14px; font-size:17px; border:0; border-radius:12px;
-           background:var(--fg); color:var(--bg); font-weight:700; }
+  .refresh { margin-top:14px; width:100%; padding:14px; font-size:17px; border:0; border-radius:12px;
+             background:var(--fg); color:var(--bg); font-weight:700; }
 </style>
 </head>
 <body>
+  <div class="tabs">
+    <button id="tab-gyodae" onclick="setAt('gyodae')">경인교대입구 탑승</button>
+    <button id="tab-bp" onclick="setAt('bp')">부평 도착</button>
+  </div>
   <div class="time" id="time">불러오는 중…</div>
   <div class="route" id="route"></div>
   <div class="card" id="a"></div>
   <div class="card" id="b"></div>
-  <button onclick="run()">다시 조회</button>
+  <button class="refresh" onclick="run()">다시 조회</button>
 <script>
+const params = new URLSearchParams(location.search);
+let at = params.get("at") === "bp" ? "bp" : "gyodae";   // ?at=bp 로 부평 탭 바로 열기
+const testTime = params.get("t");                        // 테스트용 ?t=07:41
+
 function pad(n){ return String(n).padStart(2,"0"); }
+
+function setAt(v){
+  at = v;
+  const u = new URL(location.href);
+  if (v === "bp") u.searchParams.set("at", "bp"); else u.searchParams.delete("at");
+  history.replaceState(null, "", u);
+  run();
+}
+
 async function run(){
-  const q = new URLSearchParams(location.search).get("t");        // 테스트용 ?t=07:41
+  document.getElementById("tab-gyodae").className = at === "gyodae" ? "on" : "";
+  document.getElementById("tab-bp").className = at === "bp" ? "on" : "";
+
   const now = new Date();
-  const key = q || pad(now.getHours()) + ":" + pad(now.getMinutes());
+  const key = testTime || pad(now.getHours()) + ":" + pad(now.getMinutes());
   const day = now.getDay();                                          // 0=일, 6=토
-  const file = day === 6 ? "lookup_sat.json" : day === 0 ? "lookup_hol.json" : "lookup.json";
+  const suffix = day === 6 ? "_sat" : day === 0 ? "_hol" : "";
   const dayLabel = day === 6 ? "토요일" : day === 0 ? "일요일" : "평일";
-  document.getElementById("time").textContent = `${key} 경인교대입구 탑승 · ${dayLabel}`;
+  const prefix = at === "bp" ? "lookup_bp" : "lookup";
+  const place = at === "bp" ? "부평 도착" : "경인교대입구 탑승";
+  document.getElementById("time").textContent = `${key} ${place} · ${dayLabel}`;
+
   try {
-    const r = await fetch(file + "?v=" + Date.now(), { cache: "no-store" });
+    const r = await fetch(`${prefix}${suffix}.json?v=${Date.now()}`, { cache: "no-store" });
     const d = await r.json();
     const v = d[key] || "결과 없음";
     const parts = v.split(" | ");
     const head = parts[0] || v;
-    const isSuin = head.includes("🟢");
     const el = document.getElementById("route");
     el.textContent = head.replace(/^[^\s]+\s/, "");
-    el.className = "route " + (isSuin ? "suin" : head.includes("🔵") ? "exp" : "");
+    el.className = "route " + (head.includes("🟢") ? "suin" : head.includes("🔵") ? "exp" : "");
     document.getElementById("a").innerHTML = `<b>추천</b>${parts[1] || ""}`;
     document.getElementById("b").innerHTML = `<b>다른 경로</b>${parts[2] || ""}`;
   } catch(e) {

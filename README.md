@@ -87,3 +87,12 @@ python3 generate.py
 - **"부평 도착" 버튼**: 부평 도착 시점엔 원인재까지 15분 안쪽이라 실시간 도착정보가 의미 있음.
   Cloudflare Worker 하나 띄워서 수인분당선·511 실시간 API 를 합쳐 주면 단축어는 URL만 바꾸면 됨.
 - 실제 도착시각 로그를 쌓아 config 값 자동 보정.
+
+## 웹 페이지 (단축어 없이 쓰기)
+
+- `https://steam6879.github.io/INHA-optimal-route/` — 경인교대입구 탑승 기준
+- `https://steam6879.github.io/INHA-optimal-route/?at=bp` — 부평 도착 기준 (계속 탈지 / 내릴지)
+- 테스트: 주소 뒤에 `?t=07:41` (부평은 `?at=bp&t=07:50`)
+
+부평 기준 결과는 `lookup_bp*.json` 에서 읽는다. 조회 시각에서 `ride_gyodae_to_bupyeong` 만큼 뺀 시각으로 같은 계산을 하므로,
+인천1호선이 늦어 실제 부평 도착이 밀리면 그만큼 반영된 답이 나온다.
