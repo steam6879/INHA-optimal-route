@@ -7,8 +7,8 @@
 <meta name="apple-mobile-web-app-title" content="탑승">
 <title>탑승</title>
 <style>
-  :root { --bg:#fff; --fg:#111; --sub:#666; --card:#f3f4f6; --line:#e5e7eb; --suin:#d97706; --exp:#2563eb; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0c; --fg:#f2f2f2; --sub:#9a9a9a; --card:#1c1c1f; --line:#2a2a2e; } }
+  :root { --bg:#fff; --fg:#111; --sub:#666; --card:#f3f4f6; --suin:#d97706; --exp:#2563eb; --loc:#059669; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0c; --fg:#f2f2f2; --sub:#9a9a9a; --card:#1c1c1f; } }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
          font-family:-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
@@ -18,11 +18,17 @@
                  background:transparent; color:var(--sub); }
   .tabs button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 3px rgba(0,0,0,.15); }
   .time { font-size:15px; color:var(--sub); }
-  .route { font-size:40px; font-weight:800; margin:6px 0 20px; line-height:1.15; word-break:keep-all; }
-  .route.suin { color:var(--suin); } .route.exp { color:var(--exp); }
-  .card { background:var(--card); border-radius:14px; padding:14px 16px; margin-bottom:10px; font-size:17px; line-height:1.45; }
-  .card b { display:block; font-size:13px; color:var(--sub); font-weight:600; margin-bottom:2px; }
-  .refresh { margin-top:14px; width:100%; padding:14px; font-size:17px; border:0; border-radius:12px;
+  .route { font-size:40px; font-weight:800; margin:6px 0 18px; line-height:1.15; word-break:keep-all; }
+  .c-suin { color:var(--suin); } .c-exp { color:var(--exp); } .c-loc { color:var(--loc); }
+  .card { background:var(--card); border-radius:14px; padding:13px 16px; margin-bottom:9px;
+          display:flex; align-items:center; gap:12px; border-left:5px solid transparent; }
+  .card.best { border-left-color:currentColor; }
+  .card .main { flex:1; min-width:0; }
+  .card .name { font-size:16px; font-weight:700; }
+  .card .det { font-size:15px; color:var(--sub); margin-top:2px; }
+  .card .arr { text-align:right; font-size:20px; font-weight:800; color:var(--fg); white-space:nowrap; }
+  .card .gap { display:block; font-size:13px; font-weight:600; color:var(--sub); }
+  .refresh { margin-top:12px; width:100%; padding:14px; font-size:17px; border:0; border-radius:12px;
              background:var(--fg); color:var(--bg); font-weight:700; }
 </style>
 </head>
@@ -33,15 +39,16 @@
   </div>
   <div class="time" id="time">불러오는 중…</div>
   <div class="route" id="route"></div>
-  <div class="card" id="a"></div>
-  <div class="card" id="b"></div>
+  <div id="list"></div>
   <button class="refresh" onclick="run()">다시 조회</button>
 <script>
 const params = new URLSearchParams(location.search);
 let at = params.get("at") === "bp" ? "bp" : "gyodae";   // ?at=bp 로 부평 탭 바로 열기
 const testTime = params.get("t");                        // 테스트용 ?t=07:41
 
-function pad(n){ return String(n).padStart(2,"0"); }
+const pad = n => String(n).padStart(2, "0");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const colorOf = name => name.includes("수인") ? "c-suin" : name.includes("급행") ? "c-exp" : "c-loc";
 
 function setAt(v){
   at = v;
@@ -64,19 +71,27 @@ async function run(){
   const place = at === "bp" ? "부평 도착" : "경인교대입구 탑승";
   document.getElementById("time").textContent = `${key} ${place} · ${dayLabel}`;
 
+  const routeEl = document.getElementById("route");
+  const listEl = document.getElementById("list");
   try {
     const r = await fetch(`${prefix}${suffix}.json?v=${Date.now()}`, { cache: "no-store" });
     const d = await r.json();
-    const v = d[key] || "결과 없음";
-    const parts = v.split(" | ");
-    const head = parts[0] || v;
-    const el = document.getElementById("route");
-    el.textContent = head.replace(/^[^\s]+\s/, "");
-    el.className = "route " + (head.includes("🟢") ? "suin" : head.includes("🔵") ? "exp" : "");
-    document.getElementById("a").innerHTML = `<b>추천</b>${parts[1] || ""}`;
-    document.getElementById("b").innerHTML = `<b>다른 경로</b>${parts[2] || ""}`;
+    const opts = d[key] || [];
+    if (!opts.length) {
+      routeEl.textContent = "운행 시간 아님"; routeEl.className = "route"; listEl.innerHTML = ""; return;
+    }
+    routeEl.textContent = opts[0].r;
+    routeEl.className = "route " + colorOf(opts[0].r);
+    listEl.innerHTML = opts.map((o, i) => `
+      <div class="card ${i === 0 ? "best" : ""} ${colorOf(o.r)}">
+        <div class="main">
+          <div class="name">${esc(o.r)}</div>
+          <div class="det">${esc(o.d)}</div>
+        </div>
+        <div class="arr">${esc(o.a)}<span class="gap">${i === 0 ? "추천" : "+" + o.p + "분"}</span></div>
+      </div>`).join("");
   } catch(e) {
-    document.getElementById("route").textContent = "불러오기 실패";
+    routeEl.textContent = "불러오기 실패"; routeEl.className = "route"; listEl.innerHTML = "";
   }
 }
 run();

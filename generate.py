@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
-조회 시각(HH:MM) → 최적 경로 lookup JSON 생성.
+조회 시각(HH:MM) → 세 경로 비교 lookup JSON 생성.
 
-조회 지점 두 곳:
+조회 지점:
   gyodae : 경인교대입구역에서 인천1호선 탑승한 시각
   bp     : 인천1호선이 부평역에 도착한 시각 (내릴지 / 계속 탈지 결정 직전)
 
-  경로 A: 원인재 환승 → 수인분당선(시간표) → 인하대역 → 도보
-  경로 B: 부평 환승 → 1호선 급행(시간표, 주안 정차) → 주안 → 511(상수)
+경로 (모두 시간표 기반):
+  suin    : 원인재 환승 → 수인분당선 → 인하대역 → 도보
+  express : 부평 환승 → 1호선 급행(동인천행) → 주안 → 511(상수)
+  local   : 부평 환승 → 1호선 완행(인천행)   → 주안 → 511(상수)
+
+출력 JSON: { "HH:MM": [ {r: 경로명, d: 상세, a: 도착 HH:MM, p: 1등 대비 +분}, ... ] }
+  배열은 도착 빠른 순. 운행 없는 경로는 빠짐. 빈 배열이면 운행 시간 아님.
 
 사용법:
-    python3 generate.py                     # lookup*.json 6개 생성
-    python3 generate.py --show 07:41        # 경인교대입구 기준 한 시각
+    python3 generate.py                       # lookup*.json 6개 생성
+    python3 generate.py --show 07:41          # 경인교대입구 기준 한 시각
     python3 generate.py --show 07:50 --at bp  # 부평 도착 기준 한 시각
 """
 import argparse
@@ -21,17 +26,12 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 DAYS = {
-    # day: (수인분당선 시간표, 1호선 급행 시간표, 파일 접미사)
-    "weekday": ("timetable_weekday.txt", "timetable_line1_express_weekday.txt", ""),
-    "saturday": ("timetable_saturday.txt", "timetable_line1_express_saturday.txt", "_sat"),
-    "holiday": ("timetable_holiday.txt", "timetable_line1_express_holiday.txt", "_hol"),
+    "weekday": "",
+    "saturday": "_sat",
+    "holiday": "_hol",
 }
-ORIGINS = {
-    # origin: 파일 접두사
-    "gyodae": "lookup",
-    "bp": "lookup_bp",
-}
-MAX_WAIT = 60  # 이보다 오래 기다려야 하면 '운행 없음'으로 취급 (막차 이후)
+ORIGINS = {"gyodae": "lookup", "bp": "lookup_bp"}
+MAX_WAIT = 60  # 이보다 오래 기다려야 하면 운행 없음 취급 (막차 이후)
 
 
 def hm_to_min(s: str) -> int:
@@ -48,10 +48,20 @@ def load_timetable(path: Path) -> list[int]:
     times = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        times.append(hm_to_min(line))
+        if line and not line.startswith("#"):
+            times.append(hm_to_min(line))
     return sorted(times)
+
+
+def load_day(day: str) -> dict[str, list[int]] | None:
+    files = {
+        "suin": HERE / f"timetable_{day}.txt",
+        "express": HERE / f"timetable_line1_express_{day}.txt",
+        "local": HERE / f"timetable_line1_local_{day}.txt",
+    }
+    if not all(p.exists() for p in files.values()):
+        return None
+    return {k: load_timetable(p) for k, p in files.items()}
 
 
 def next_train(trains: list[int], t: int) -> int | None:
@@ -68,73 +78,58 @@ def gyodae_time(t: int, origin: str, cfg: dict) -> int:
     return t
 
 
-def evaluate(t: int, suin_tt: list[int], exp_tt: list[int], cfg: dict) -> dict:
-    """t = 경인교대입구 탑승 시각(분). 두 경로의 학교 도착 시각 계산."""
-    c, s, e = cfg["common"], cfg["route_suin"], cfg["route_express"]
+def evaluate(t: int, tt: dict, cfg: dict, origin: str) -> list[dict]:
+    """t = 경인교대입구 탑승 시각(분). 경로별 학교 도착 시각 목록(빠른 순)."""
+    c, s, l1 = cfg["common"], cfg["route_suin"], cfg["route_line1"]
+    bp = origin == "bp"
+    opts = []
 
-    # --- 경로 A: 수인분당선 ---
+    # 수인분당선
     platform = t + c["ride_gyodae_to_woninjae"] + s["transfer_woninjae"]
-    train = next_train(suin_tt, platform)
-    suin = None
-    if train is not None:
-        suin = {
-            "train": train,
-            "wait": train - platform,
-            "arrive": train + s["ride_woninjae_to_inhadae"] + s["walk_inhadae_to_school"],
-        }
+    tr = next_train(tt["suin"], platform)
+    if tr is not None:
+        opts.append({
+            "key": "suin",
+            "r": ("계속 타기 → " if bp else "") + s["label"],
+            "d": f"원인재 {min_to_hm(tr)} (대기 {tr - platform}분)",
+            "arr": tr + s["ride_woninjae_to_inhadae"] + s["walk_inhadae_to_school"],
+        })
 
-    # --- 경로 B: 1호선 급행 → 주안 → 511 ---
-    bp_platform = t + c["ride_gyodae_to_bupyeong"] + e["transfer_bupyeong"]
-    exp = next_train(exp_tt, bp_platform)
-    cand = []
-    if exp is not None:
-        cand.append({"kind": "급행", "train": exp, "wait": exp - bp_platform,
-                     "juan": exp + e["express_ride_bupyeong_to_juan"]})
-    if e.get("local_fallback", True) and (exp is not None or train is not None):
-        dep = bp_platform + e["local_avg_wait"]
-        cand.append({"kind": "일반", "train": dep, "wait": e["local_avg_wait"],
-                     "juan": dep + e["local_ride_bupyeong_to_juan"]})
-    express = None
-    if cand:
-        best = min(cand, key=lambda x: x["juan"])
-        best["arrive"] = best["juan"] + e["juan_to_school"]
-        express = best
+    # 1호선 급행 / 완행
+    bp_platform = t + c["ride_gyodae_to_bupyeong"] + l1["transfer_bupyeong"]
+    for key, ride in (("express", l1["express_ride_bupyeong_to_juan"]),
+                      ("local", l1["local_ride_bupyeong_to_juan"])):
+        tr = next_train(tt[key], bp_platform)
+        if tr is None:
+            continue
+        opts.append({
+            "key": key,
+            "r": ("내리기 → " if bp else "") + l1[f"{key}_label"],
+            "d": f"부평 {min_to_hm(tr)} (대기 {tr - bp_platform}분)",
+            "arr": tr + ride + l1["juan_to_school"],
+        })
 
-    return {"suin": suin, "express": express}
-
-
-def render(r: dict, cfg: dict, origin: str) -> str:
-    s, x = r["suin"], r["express"]
+    # 정렬: 도착 빠른 순. 수인분당선은 margin 만큼 불리하게 비교
     margin = cfg["decision"]["suin_margin"]
-    if origin == "bp":
-        L_s, L_x = "계속 타기 → 수인분당선", "내리기 → 급행+511"
-    else:
-        L_s, L_x = cfg["route_suin"]["label"], cfg["route_express"]["label"]
-
-    suin_txt = None if s is None else \
-        f"원인재 {min_to_hm(s['train'])} (대기 {s['wait']}분) → {min_to_hm(s['arrive'])}"
-    exp_txt = None if x is None else \
-        f"부평 {x['kind']} {min_to_hm(x['train'])} (대기 {x['wait']}분) → {min_to_hm(x['arrive'])}"
-
-    if s is None and x is None:
-        return "⚫ 운행 시간 아님"
-    if s is None:
-        return f"🔵 {L_x} | {exp_txt} | 수인분당선 운행 없음"
-    if x is None:
-        return f"🟢 {L_s} | {suin_txt} | 1호선 운행 없음"
-
-    diff = x["arrive"] - s["arrive"]  # 양수면 수인분당선이 빠름
-    if diff >= margin:
-        return f"🟢 {L_s} | {suin_txt} | {L_x} {exp_txt} (+{diff}분)"
-    return f"🔵 {L_x} | {exp_txt} | {L_s} {suin_txt} (+{-diff}분)"
+    opts.sort(key=lambda o: (o["arr"] + (margin if o["key"] == "suin" else 0), o["key"] != "suin"))
+    return opts
 
 
-def build(suin_tt, exp_tt, cfg, origin) -> dict[str, str]:
-    out = {}
-    for t in range(24 * 60):
-        r = evaluate(gyodae_time(t, origin, cfg), suin_tt, exp_tt, cfg)
-        out[min_to_hm(t)] = render(r, cfg, origin)
-    return out
+def to_json(opts: list[dict]) -> list[dict]:
+    if not opts:
+        return []
+    best = opts[0]["arr"]
+    return [{"r": o["r"], "d": o["d"], "a": min_to_hm(o["arr"]), "p": o["arr"] - best} for o in opts]
+
+
+def to_text(opts: list[dict]) -> str:
+    if not opts:
+        return "운행 시간 아님"
+    rows = to_json(opts)
+    return "  /  ".join(
+        f"{'★' if i == 0 else ''}{x['r']}: {x['d']} → {x['a']}" + (f" (+{x['p']})" if i else "")
+        for i, x in enumerate(rows)
+    )
 
 
 def main():
@@ -146,23 +141,25 @@ def main():
     cfg = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
 
     if args.show:
-        s_src, e_src, _ = DAYS["weekday"]
-        t = gyodae_time(hm_to_min(args.show), args.at, cfg)
-        r = evaluate(t, load_timetable(HERE / s_src), load_timetable(HERE / e_src), cfg)
-        print(render(r, cfg, args.at))
+        tt = load_day("weekday")
+        print(to_text(evaluate(gyodae_time(hm_to_min(args.show), args.at, cfg), tt, cfg, args.at)))
         return
 
-    for day, (s_src, e_src, suffix) in DAYS.items():
-        if not (HERE / s_src).exists() or not (HERE / e_src).exists():
+    for day, suffix in DAYS.items():
+        tt = load_day(day)
+        if tt is None:
             print(f"skip {day}: 시간표 파일 없음", file=sys.stderr)
             continue
-        suin_tt, exp_tt = load_timetable(HERE / s_src), load_timetable(HERE / e_src)
         for origin, prefix in ORIGINS.items():
+            table, wins = {}, {"suin": 0, "express": 0, "local": 0}
+            for t in range(24 * 60):
+                opts = evaluate(gyodae_time(t, origin, cfg), tt, cfg, origin)
+                table[min_to_hm(t)] = to_json(opts)
+                if opts:
+                    wins[opts[0]["key"]] += 1
             dst = f"{prefix}{suffix}.json"
-            table = build(suin_tt, exp_tt, cfg, origin)
-            (HERE / dst).write_text(json.dumps(table, ensure_ascii=False, indent=0), encoding="utf-8")
-            n = sum(v.startswith("🟢") for v in table.values())
-            print(f"{dst}: 1440분 중 수인분당선 추천 {n}분")
+            (HERE / dst).write_text(json.dumps(table, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            print(f"{dst}: 1순위 분포 {wins}")
 
 
 if __name__ == "__main__":

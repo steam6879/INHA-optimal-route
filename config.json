@@ -1,5 +1,5 @@
 {
-  "_comment": "모든 값은 분 단위. 실측해서 고치면 generate.py 다시 실행.",
+  "_comment": "모든 값은 분 단위. GitHub에서 고치고 Commit하면 Actions가 lookup*.json을 다시 만든다.",
 
   "common": {
     "ride_gyodae_to_bupyeong": 9,
@@ -13,20 +13,19 @@
     "walk_inhadae_to_school": 7
   },
 
-  "route_express": {
-    "label": "급행+511",
+  "route_line1": {
+    "_comment": "부평 환승 → 1호선 → 주안 → 511. 급행·완행 둘 다 시간표로 계산.",
     "transfer_bupyeong": 4,
+    "express_label": "급행+511",
     "express_ride_bupyeong_to_juan": 5,
-    "local_fallback": true,
-    "local_avg_wait": 3,
+    "local_label": "완행+511",
     "local_ride_bupyeong_to_juan": 8,
     "juan_to_school": 25,
-    "_comment_juan_to_school": "주안역 1호선 하차 → 학교 도착까지 전부(환승정류장 도보 + 511 대기 + 승차 + 도보). 511은 사용자가 직접 관리하는 값이라 상수 하나로 뺌.",
-    "_comment_local_fallback": "true면 다음 급행이 너무 멀 때 일반열차(평균 대기+승차)로 가는 경우도 계산해서 더 빠른 쪽을 씀. false면 급행만."
+    "_comment_juan_to_school": "주안역 1호선 하차 → 학교 도착까지 전부(환승정류장 도보 + 511 대기 + 승차 + 도보). 511은 직접 관리하는 값."
   },
 
   "decision": {
-    "_comment": "수인분당선이 이만큼(분) 이상 빨라야 수인분당선 추천. 0이면 단순 비교.",
+    "_comment": "수인분당선이 1호선 경로보다 이만큼(분) 이상 빨라야 수인분당선을 1순위로. 0이면 단순 비교.",
     "suin_margin": 0
   }
 }

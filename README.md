@@ -14,7 +14,8 @@
 |---|---|
 | `config.json` | 구간별 소요시간(분). **실측해서 고치는 파일** |
 | `timetable_weekday.txt` 등 | 수인분당선 원인재역 인천방면 출발 시각표 (평일/토/공휴일) |
-| `timetable_line1_express_*.txt` | 1호선 부평역 인천방면 **급행·특급** 출발 시각표 (주안 정차) |
+| `timetable_line1_express_*.txt` | 1호선 부평역 인천방면 **급행·특급** 출발 시각표 (동인천행, 주안 정차) |
+| `timetable_line1_local_*.txt` | 1호선 부평역 인천방면 **완행** 출발 시각표 (인천행) |
 | `generate.py` | config + 시간표 → `lookup.json`, `lookup_sat.json`, `lookup_hol.json` |
 | `fetch_tago.py` | 공공데이터포털 API로 시간표 갱신 (시간표 개정 때만) |
 | `lookup*.json` | 단축어가 읽는 결과 파일. GitHub Pages 에 올림 |
@@ -32,7 +33,7 @@ python3 generate.py --show 07:41   # 한 시각만 확인
 - `transfer_bupyeong` / `transfer_woninjae` (환승 도보, 기본 4 / 3)
 - `walk_inhadae_to_school` (인하대역→실제 가는 건물, 기본 7)
 - `juan_to_school` (주안역 하차→학교 도착 전부, 기본 25 — **511은 여기 하나로 관리**)
-- `local_fallback`: 다음 급행이 멀면 일반열차로 가는 경우도 계산해 더 빠른 쪽 사용(기본 true). 급행만 보려면 false.
+- `express_ride_bupyeong_to_juan` / `local_ride_bupyeong_to_juan` (부평→주안 급행 5 / 완행 8)
 
 ### 1호선 급행 시간표 주의
 공개 데이터에 급행 표시가 없어서 **동인천 종착 열차 = 급행/특급**으로 추렸다.
